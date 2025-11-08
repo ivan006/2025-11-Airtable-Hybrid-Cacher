@@ -51,6 +51,7 @@ class CurlClient
         curl_setopt_array($this->curl, array(
             CURLOPT_URL => $url,
             CURLOPT_HTTPHEADER => $headers,
+            // CURLOPT_FILE => is_null($file) ? fopen('php://output', 'w') : $file,
             CURLOPT_FILE => is_null($file) ? STDOUT : $file, // STDOUT if no file
         ));
 
