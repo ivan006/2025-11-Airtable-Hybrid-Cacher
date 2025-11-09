@@ -11,32 +11,37 @@ switch ($action) {
 
     // 🧩 SAVE
     case 'save':
-        $data = json_decode(file_get_contents('php://input'), true);
-        if (!$data || !isset($data['records'])) {
-            http_response_code(400);
-            echo json_encode(['error' => 'Invalid data']);
+        $json = file_get_contents('php://input');
+        $data = json_decode($json, true);
+        $records = $data['records'] ?? [];
+        $duration = $data['duration'] ?? null;
+
+        if (!$records) {
+            echo json_encode(['error' => 'No records provided']);
             exit;
         }
 
-        $hash = md5(json_encode($data['records']));
-        $path = "$dir/bound-$hash.json";
-        file_put_contents($path, json_encode($data['records'], JSON_PRETTY_PRINT));
-        echo json_encode(['status' => 'saved', 'file' => basename($path), 'records' => count($data['records'])]);
+        $hash = hash('sha256', json_encode($records[0]['table'] ?? 'boundcache'));
+        $file = "$dir/merged-$hash.json";
+
+        $payload = [
+            'records' => $records,
+            'meta' => [
+            'created_at' => date('c'),
+            'duration_seconds' => $duration ? floatval($duration) : null
+            ]
+        ];
+
+        file_put_contents($file, json_encode($payload, JSON_PRETTY_PRINT));
+
+        echo json_encode([
+            'status' => 'saved',
+            'records' => count($records),
+            'file' => basename($file),
+            'duration_seconds' => $duration
+        ]);
         break;
 
-        // 🧩 LIST
-        case 'list':
-        $files = glob("$dir/bound-*.json");
-        $out = [];
-        foreach ($files as $f) {
-            $out[] = [
-            'file' => basename($f),
-            'size' => filesize($f),
-            'modified' => date('Y-m-d H:i:s', filemtime($f))
-            ];
-        }
-        echo json_encode($out, JSON_PRETTY_PRINT);
-        break;
 
   // 🧩 GET
   case 'get':
@@ -55,7 +60,6 @@ switch ($action) {
 
     $file = $_GET['file'] ?? '';
     $path = "$dir/$file";
-    error_log("🧹 DELETE ATTEMPT: " . $path);
     if (file_exists($path)) unlink($path);
     echo json_encode(['status' => 'deleted', 'file' => $file]);
     break;

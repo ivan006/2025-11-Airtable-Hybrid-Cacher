@@ -158,14 +158,15 @@ document.addEventListener("DOMContentLoaded", () => {
 
   }
 
-  async function saveBoundCache(records) {
+  async function saveBoundCache(records, duration) {
     const res = await fetch('bound-cache.php?action=save', {
       method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({records})
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ records, duration })
     });
     return await res.json();
   }
+
 
   async function listBoundCaches() {
     const res = await fetch('bound-cache.php?action=list');
@@ -230,51 +231,34 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById('startBtn').addEventListener('click', async () => {
     const url = document.getElementById('apiUrl').value.trim();
     const path = document.getElementById('attachmentPath').value.trim();
+    const progress = document.getElementById('statusText');
+
     if (!url) {
-      const progress = document.getElementById('statusText');
       progress.className = 'alert alert-warning';
       progress.textContent = '⚠️ Enter Airtable API URL before starting.';
       return;
     }
 
+    const compileStart = performance.now(); // ⏱️ start compile timer
 
-    const progress = document.getElementById('statusText');
     progress.className = 'alert alert-info';
-    progress.textContent = 'Checking for existing bound cache...';
+    progress.textContent = '⏳ Starting compilation...';
 
-    // Compute hash of the API URL (same logic used for bound-cache.php)
-    const hashBuffer = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(url));
-    const hashHex = Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
-    const cachePath = `cache/merged-${hashHex}.json`;
+    document.getElementById('attachmentGrid').innerHTML = '';
+    const records = await fetchAllPages(url, path);
 
-    // Try to load existing cache
-    const existing = await fetch(cachePath).then(r => (r.ok ? r.json() : null)).catch(() => null);
+    const compileEnd = performance.now(); // ⏱️ end compile timer
+    const compileDuration = ((compileEnd - compileStart) / 1000).toFixed(2);
 
-    let records;
-    if (existing) {
-      const useExisting = confirm('A bound cache for this URL already exists. Use it instead of refetching?');
-      if (useExisting) {
-        progress.textContent = '✅ Using existing bound cache...';
-        records = existing.records || existing;
-      } else {
-        const confirmRebuild = confirm('Rebuild will overwrite the existing cache. Continue?');
-        if (!confirmRebuild) return;
-        await fetch(`bound-cache.php?action=delete&file=${encodeURIComponent(`merged-${hashHex}.json`)}`);
-        progress.textContent = '♻️ Rebuilding cache from Airtable...';
-        records = await fetchAllPages(url, path);
-        await saveBoundCache(records);
-      }
-    } else {
-      progress.textContent = '⬇️ Fetching fresh data...';
-      records = await fetchAllPages(url, path);
-      await saveBoundCache(records);
-    }
+    const result = await saveBoundCache(records, compileDuration);
 
-    // Touch attachments if needed
-    if (path) await touchAttachments(records, path);
-    progress.className = 'alert alert-success';
-    progress.textContent = `✅ Completed using ${existing ? 'existing' : 'new'} cache`;
+    progress.className = result.status === 'saved' ? 'alert alert-success' : 'alert alert-danger';
+    progress.textContent =
+      result.status === 'saved'
+        ? `✅ Compiled cache in ${compileDuration}s (${result.records} records saved)`
+        : `❌ Error saving: ${result.error}`;
   });
+
 
 
   document.getElementById('listBtn').addEventListener('click', listBoundCaches);
