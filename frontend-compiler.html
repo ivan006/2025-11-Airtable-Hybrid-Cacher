@@ -253,21 +253,46 @@ document.addEventListener("DOMContentLoaded", () => {
     const pathParts = attachmentPath.split('.');
     const urls = [];
 
-    records.forEach(r => {
+    console.groupCollapsed('🧩 [TouchAttachments Debug]');
+    console.time('⏱️ Attachment processing time');
+
+    console.log('🔹 Attachment path:', attachmentPath);
+    console.log('📦 Records count:', records.length);
+
+    // === Extract URLs ===
+    records.forEach((r, i) => {
       let val = r.fields;
-      for (const p of pathParts) val = val?.[p];
-      if (Array.isArray(val)) val.forEach(v => urls.push(v.url || v));
-      else if (typeof val === 'string') urls.push(val);
+      for (const p of pathParts) {
+        const match = p.match(/^(.+)\[(\d+)\]$/); // e.g. Attachments[0]
+        if (match) {
+          const key = match[1];
+          const index = parseInt(match[2]);
+          val = Array.isArray(val?.[key]) ? val[key][index] : undefined;
+        } else {
+          val = val?.[p];
+        }
+      }
+
+      if (Array.isArray(val)) {
+        val.forEach(v => urls.push(v.url || v));
+      } else if (typeof val === 'string') {
+        urls.push(val);
+      }
     });
+
+    console.log('🔗 URLs found:', urls.length);
+    if (urls.length) console.log('🧾 Example URLs:', urls.slice(0, 3));
 
     if (!urls.length) {
       console.warn('⚠️ No attachments found for path:', attachmentPath);
+      console.groupEnd();
       return;
     }
 
     const total = urls.length;
     let loaded = 0;
 
+    // === Progress setup ===
     if (attachmentBar) {
       attachmentBar.classList.remove('progress-bar-animated', 'progress-bar-striped');
       attachmentBar.style.transition = 'none';
@@ -280,9 +305,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
     if (grid) grid.innerHTML = '';
 
+    // === Fetch each attachment through proxy ===
     for (const url of urls) {
+      const proxiedUrl = `index.php?url=${encodeURIComponent(url)}`;
       const img = document.createElement('img');
-      img.src = `index.php?url=${encodeURIComponent(url)}`;
+      img.src = proxiedUrl;
       img.title = url.split('/').pop();
       if (grid) grid.appendChild(img);
 
@@ -293,6 +320,11 @@ document.addEventListener("DOMContentLoaded", () => {
           attachmentBar.style.width = `${pct}%`;
           attachmentBar.textContent = `${loaded} / ${total}`;
         }
+
+        // periodic debug
+        if (loaded % 10 === 0 || loaded === total)
+          console.log(`🖼️ Loaded ${loaded}/${total} attachments`);
+
         res();
       }));
     }
@@ -301,7 +333,11 @@ document.addEventListener("DOMContentLoaded", () => {
       attachmentBar.style.width = '100%';
       attachmentBar.textContent = 'All attachments cached';
     }
+
+    console.timeEnd('⏱️ Attachment processing time');
+    console.groupEnd();
   }
+
 
 
   document.getElementById('startBtn').addEventListener('click', async () => {
