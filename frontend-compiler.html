@@ -158,8 +158,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
   }
 
-  async function saveBoundCache(records, duration) {
-    const res = await fetch('bound-cache.php?action=save', {
+  async function saveBoundCache(records, duration, apiUrl) {
+    const res = await fetch(`bound-cache.php?action=save&url=${encodeURIComponent(apiUrl)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ records, duration })
@@ -250,7 +250,8 @@ document.addEventListener("DOMContentLoaded", () => {
     const compileEnd = performance.now(); // ⏱️ end compile timer
     const compileDuration = ((compileEnd - compileStart) / 1000).toFixed(2);
 
-    const result = await saveBoundCache(records, compileDuration);
+    const result = await saveBoundCache(records, compileDuration, url);
+
 
     progress.className = result.status === 'saved' ? 'alert alert-success' : 'alert alert-danger';
     progress.textContent =
@@ -275,7 +276,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const hashBuffer = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(url));
     const hashHex = Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
-    const filename = `merged-${hashHex}.json`;
+    const filename = `bound-${hashHex}.json`;
 
     if (!confirm(`Delete bound cache for this URL?\n\n(${filename})`)) return;
 
@@ -286,9 +287,9 @@ document.addEventListener("DOMContentLoaded", () => {
       const res = await fetch(`bound-cache.php?action=delete&file=${encodeURIComponent(filename)}`);
       const data = await res.json();
 
-      if (data.deleted || data.status === 'deleted') {
+      if (data.deleted) {
         progress.className = 'alert alert-success';
-        progress.textContent = `✅ Deleted bound cache: ${file}`;
+        progress.textContent = `✅ Deleted bound cache: ${filename}`;
       } else {
         progress.className = 'alert alert-warning';
         progress.textContent = `⚠️ Could not delete bound cache: ${filename}`;
