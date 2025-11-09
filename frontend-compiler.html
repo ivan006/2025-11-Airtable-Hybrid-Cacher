@@ -17,7 +17,7 @@
 </head>
 <body class="p-5 bg-light">
 <div class="container">
-  <h1 class="mb-4">Airtable Hybrid Caching — Bound Cache + Attachment Toucher</h1>
+  <h1 class="mb-4">Airtable Hybrid Cacher — Bind Paginated Data + Cache Attachment</h1>
 
   <!-- INPUTS -->
   <div class="row g-3 mb-3">
@@ -317,6 +317,19 @@ document.addEventListener("DOMContentLoaded", () => {
     progress,
     fetchRecordsFn,      // function to get records (fetchAllPages or from bound cache)
   }) {
+    const elapsedEl = document.getElementById('elapsedTime');
+    elapsedEl.classList.remove('d-none');
+
+    let elapsed = 0;
+    const startTime = new Date();
+    elapsedEl.textContent = `Started at ${startTime.toLocaleTimeString()} | Elapsed: ${elapsed}s`;
+
+    const timer = setInterval(() => {
+      elapsed++;
+      elapsedEl.textContent = `Started at ${startTime.toLocaleTimeString()} | Elapsed: ${elapsed}s`;
+    }, 1000);
+
+
     // reset UI
     attachmentGrid.innerHTML = '';
     attachmentBar.style.width = '0%';
@@ -342,6 +355,12 @@ document.addEventListener("DOMContentLoaded", () => {
       progress.className = 'alert alert-warning';
       progress.textContent = '⚠️ No attachment path given — skipping attachment caching.';
     }
+
+    clearInterval(timer);
+    const endTime = new Date();
+    elapsedEl.textContent =
+      `Started at ${startTime.toLocaleTimeString()} → Ended at ${endTime.toLocaleTimeString()} (${elapsed}s total)`;
+
 
     return records;
   }
@@ -385,24 +404,7 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-
-
     // === If cache does NOT exist, perform full compilation ===
-    const compileStart = performance.now();
-    // ⏱️ Start elapsed timer
-    const elapsedEl = document.getElementById('elapsedTime');
-    elapsedEl.classList.remove('d-none');
-
-    let elapsed = 0;
-    const startTime = new Date();
-    elapsedEl.textContent = `Started at ${startTime.toLocaleTimeString()} | Elapsed: ${elapsed}s`;
-
-    const timer = setInterval(() => {
-      elapsed++;
-      elapsedEl.textContent = `Started at ${startTime.toLocaleTimeString()} | Elapsed: ${elapsed}s`;
-    }, 1000);
-
-
     progress.className = 'alert alert-info';
     progress.textContent = '⏳ Starting full compilation...';
 
@@ -416,22 +418,19 @@ document.addEventListener("DOMContentLoaded", () => {
       fetchRecordsFn: fetchAllPages,
     });
 
-
+    // Save cache after compilation finishes
+    const compileStart = performance.now();
     const compileEnd = performance.now();
     const compileDuration = ((compileEnd - compileStart) / 1000).toFixed(2);
 
     const result = await saveBoundCache(records, compileDuration, url);
     progress.className = result.status === 'saved' ? 'alert alert-success' : 'alert alert-danger';
-    clearInterval(timer);
-    const endTime = new Date();
-    elapsedEl.textContent =
-      `Started at ${startTime.toLocaleTimeString()} → Ended at ${endTime.toLocaleTimeString()} (${elapsed}s total)`;
-
     progress.textContent =
       result.status === 'saved'
-        ? `✅ Compiled cache in ${compileDuration}s (${result.records} records saved)`
+        ? `✅ Compiled cache (${result.records} records saved)`
         : `❌ Error saving: ${result.error}`;
   });
+
 
 
 
