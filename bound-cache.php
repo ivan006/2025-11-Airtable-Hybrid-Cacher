@@ -9,34 +9,34 @@ $action = $_GET['action'] ?? 'list';
 
 switch ($action) {
 
-  // 🧩 SAVE
-  case 'save':
-    $data = json_decode(file_get_contents('php://input'), true);
-    if (!$data || !isset($data['records'])) {
-      http_response_code(400);
-      echo json_encode(['error' => 'Invalid data']);
-      exit;
-    }
+    // 🧩 SAVE
+    case 'save':
+        $data = json_decode(file_get_contents('php://input'), true);
+        if (!$data || !isset($data['records'])) {
+            http_response_code(400);
+            echo json_encode(['error' => 'Invalid data']);
+            exit;
+        }
 
-    $hash = md5(json_encode($data['records']));
-    $path = "$dir/bound-$hash.json";
-    file_put_contents($path, json_encode($data['records'], JSON_PRETTY_PRINT));
-    echo json_encode(['status' => 'saved', 'file' => basename($path), 'records' => count($data['records'])]);
-    break;
+        $hash = md5(json_encode($data['records']));
+        $path = "$dir/bound-$hash.json";
+        file_put_contents($path, json_encode($data['records'], JSON_PRETTY_PRINT));
+        echo json_encode(['status' => 'saved', 'file' => basename($path), 'records' => count($data['records'])]);
+        break;
 
-  // 🧩 LIST
-  case 'list':
-    $files = glob("$dir/bound-*.json");
-    $out = [];
-    foreach ($files as $f) {
-      $out[] = [
-        'file' => basename($f),
-        'size' => filesize($f),
-        'modified' => date('Y-m-d H:i:s', filemtime($f))
-      ];
-    }
-    echo json_encode($out, JSON_PRETTY_PRINT);
-    break;
+        // 🧩 LIST
+        case 'list':
+        $files = glob("$dir/bound-*.json");
+        $out = [];
+        foreach ($files as $f) {
+            $out[] = [
+            'file' => basename($f),
+            'size' => filesize($f),
+            'modified' => date('Y-m-d H:i:s', filemtime($f))
+            ];
+        }
+        echo json_encode($out, JSON_PRETTY_PRINT);
+        break;
 
   // 🧩 GET
   case 'get':
