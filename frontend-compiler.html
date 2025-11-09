@@ -35,7 +35,17 @@
   <button id="startBtn" class="btn btn-primary">Start Compilation</button>
   <button id="listBtn" class="btn btn-secondary ms-2">List Bound Caches</button>
 
-  <div id="progress" class="mt-3 alert alert-info d-none"></div>
+  <div id="progressContainer" class="mt-3">
+    <h3 id="pageLabel" class="fw-bold text-primary">Page 0</h3>
+
+    <div class="mb-2 fw-bold">Image Progress (per page)</div>
+    <div class="progress">
+      <div id="imageProgress" class="progress-bar bg-success" style="width: 0%">0%</div>
+    </div>
+  </div>
+
+  <div id="statusText" class="mt-3 alert alert-info d-none"></div>
+
 
   <!-- Attachment Preview Grid -->
   <div id="imageGrid" class="mt-4 d-flex flex-wrap"></div>
@@ -45,127 +55,161 @@
 </div>
 
 <script>
-async function fetchAllPages(url, imagePath) {
-  const allRecords = [];
-  let offset = null;
-  let page = 1;
-  const progress = document.getElementById('progress');
-  const imageGrid = document.getElementById('imageGrid');
+document.addEventListener("DOMContentLoaded", () => {
 
-  do {
-    const pagedUrl = offset ? `${url}&offset=${encodeURIComponent(offset)}` : url;
-    const res = await fetch(`index.php?url=${encodeURIComponent(pagedUrl)}&format=json`);
-    const data = await res.json();
+  async function fetchAllPages(url, imagePath) {
+    const allRecords = [];
+    let offset = null;
+    let page = 1;
+    const status = document.getElementById('statusText');
+    const pageBar = document.getElementById('pageProgress');
+    const imageBar = document.getElementById('imageProgress');
+    const imageGrid = document.getElementById('imageGrid');
 
-    const records = data.records || [];
-    allRecords.push(...records);
-    offset = data.offset;
+    const totalEstimate = 100; // rough estimate if Airtable pages are unknown
 
-    // 🧩 touch attachments through proxy
-    if (imagePath) {
-      const pathParts = imagePath.split('.');
-      records.forEach(rec => {
-        let value = rec.fields;
-        for (const part of pathParts) {
-          value = value?.[part];
-        }
+    do {
+      const pagedUrl = offset ? `${url}&offset=${encodeURIComponent(offset)}` : url;
+      const res = await fetch(`index.php?url=${encodeURIComponent(pagedUrl)}&format=json`);
+      const data = await res.json();
+      const records = data.records || [];
 
-        if (Array.isArray(value)) {
-          value.forEach(v => {
-            const imgUrl = v.url || v;
-            if (imgUrl) touchImage(imgUrl, imageGrid);
+      allRecords.push(...records);
+      offset = data.offset;
+
+      status.classList.remove('d-none');
+      status.textContent = `Fetched page ${page}, total records so far: ${allRecords.length}`;
+
+      // === ATTACHMENT LOADING WITH SUB PROGRESS ===
+      if (imagePath) {
+        const pathParts = imagePath.split('.');
+        const imagePromises = [];
+        let loadedCount = 0;
+        let totalImages = 0;
+
+        // Collect image URLs
+        const imageUrls = [];
+        records.forEach(rec => {
+          let value = rec.fields;
+          for (const part of pathParts) value = value?.[part];
+          if (Array.isArray(value)) {
+            value.forEach(v => imageUrls.push(v.url || v));
+          } else if (typeof value === 'string') {
+            imageUrls.push(value);
+          }
+        });
+
+        totalImages = imageUrls.length;
+        imageBar.style.width = '0%';
+        imageBar.textContent = `0 / ${totalImages}`;
+
+        for (const imgUrl of imageUrls) {
+          const proxiedUrl = `index.php?url=${encodeURIComponent(imgUrl)}`;
+          const img = document.createElement('img');
+          img.src = proxiedUrl;
+          img.title = imgUrl.split('/').pop();
+          imageGrid.appendChild(img);
+
+          await new Promise(resolve => {
+            img.onload = img.onerror = () => {
+              loadedCount++;
+              const pct = totalImages ? Math.round((loadedCount / totalImages) * 100) : 100;
+              imageBar.style.width = `${pct}%`;
+              imageBar.textContent = `${loadedCount} / ${totalImages}`;
+              resolve();
+            };
           });
-        } else if (typeof value === 'string') {
-          touchImage(value, imageGrid);
         }
-      });
-    }
+      }
 
-    progress.classList.remove('d-none');
-    progress.textContent = `Fetched page ${page++}, total records: ${allRecords.length}`;
-    await new Promise(r => setTimeout(r, 400)); // slight delay to throttle
-  } while (offset);
+      // === UPDATE PAGE PROGRESS ===
+      const pctPages = Math.min(100, Math.round((page / totalEstimate) * 100));
+      pageBar.style.width = `${pctPages}%`;
+      pageBar.textContent = `Page ${page}`;
 
-  return allRecords;
-}
+      page++;
+      await new Promise(r => setTimeout(r, 400)); // rate-limit between pages
+    } while (offset);
 
-function touchImage(url, grid) {
-  const proxiedUrl = `index.php?url=${encodeURIComponent(url)}`;
-  const img = document.createElement('img');
-  img.src = proxiedUrl;
-  img.title = url.split('/').pop();
-  grid.appendChild(img);
-}
-
-async function saveBoundCache(records) {
-  const res = await fetch('bound-cache.php?action=save', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({records})
-  });
-  return await res.json();
-}
-
-async function listBoundCaches() {
-  const res = await fetch('bound-cache.php?action=list');
-  const data = await res.json();
-  const listDiv = document.getElementById('cacheList');
-  listDiv.innerHTML = '<h4>Existing Bound Caches</h4>';
-
-  if (!data.length) {
-    listDiv.innerHTML += '<p>No bound caches found.</p>';
-    return;
+    pageBar.style.width = '100%';
+    pageBar.textContent = 'All pages complete';
+    imageBar.style.width = '100%';
+    imageBar.textContent = 'All images cached';
+    return allRecords;
   }
 
-  const table = document.createElement('table');
-  table.className = 'table table-bordered';
-  table.innerHTML = `
-    <thead>
-      <tr><th>File</th><th>Size (bytes)</th><th>Modified</th><th>Actions</th></tr>
-    </thead>
-    <tbody>
-      ${data.map(f => `
-        <tr>
-          <td>${f.file}</td>
-          <td>${f.size}</td>
-          <td>${f.modified}</td>
-          <td>
-            <a href="cache/${f.file}" target="_blank" class="btn btn-sm btn-success">View</a>
-            <button class="btn btn-sm btn-danger" onclick="deleteCache('${f.file}')">Delete</button>
-          </td>
-        </tr>`).join('')}
-    </tbody>`;
-  listDiv.appendChild(table);
-}
+  async function saveBoundCache(records) {
+    const res = await fetch('bound-cache.php?action=save', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({records})
+    });
+    return await res.json();
+  }
 
-async function deleteCache(file) {
-  if (!confirm(`Delete ${file}?`)) return;
-  const res = await fetch(`bound-cache.php?action=delete&file=${encodeURIComponent(file)}`);
-  const data = await res.json();
-  alert(`Deleted: ${data.file}`);
-  listBoundCaches();
-}
+  async function listBoundCaches() {
+    const res = await fetch('bound-cache.php?action=list');
+    const data = await res.json();
+    const listDiv = document.getElementById('cacheList');
+    listDiv.innerHTML = '<h4>Existing Bound Caches</h4>';
 
-document.getElementById('startBtn').addEventListener('click', async () => {
-  const url = document.getElementById('apiUrl').value.trim();
-  const path = document.getElementById('imagePath').value.trim();
-  if (!url) return alert('Enter Airtable API URL');
+    if (!data.length) {
+      listDiv.innerHTML += '<p>No bound caches found.</p>';
+      return;
+    }
 
-  const progress = document.getElementById('progress');
-  progress.className = 'alert alert-info';
-  progress.textContent = 'Starting fetch...';
+    const table = document.createElement('table');
+    table.className = 'table table-bordered';
+    table.innerHTML = `
+      <thead>
+        <tr><th>File</th><th>Size (bytes)</th><th>Modified</th><th>Actions</th></tr>
+      </thead>
+      <tbody>
+        ${data.map(f => `
+          <tr>
+            <td>${f.file}</td>
+            <td>${f.size}</td>
+            <td>${f.modified}</td>
+            <td>
+              <a href="cache/${f.file}" target="_blank" class="btn btn-sm btn-success">View</a>
+              <button class="btn btn-sm btn-danger" onclick="deleteCache('${f.file}')">Delete</button>
+            </td>
+          </tr>`).join('')}
+      </tbody>`;
+    listDiv.appendChild(table);
+  }
 
-  document.getElementById('imageGrid').innerHTML = ''; // clear old images
-  const records = await fetchAllPages(url, path);
-  const result = await saveBoundCache(records);
+  async function deleteCache(file) {
+    if (!confirm(`Delete ${file}?`)) return;
+    const res = await fetch(`bound-cache.php?action=delete&file=${encodeURIComponent(file)}`);
+    const data = await res.json();
+    alert(`Deleted: ${data.file}`);
+    listBoundCaches();
+  }
 
-  progress.className = result.status === 'saved' ? 'alert alert-success' : 'alert alert-danger';
-  progress.textContent = result.status === 'saved'
-    ? `✅ Saved ${result.records} records to ${result.file}`
-    : `❌ Error saving: ${result.error}`;
+  document.getElementById('startBtn').addEventListener('click', async () => {
+    const url = document.getElementById('apiUrl').value.trim();
+    const path = document.getElementById('imagePath').value.trim();
+    if (!url) return alert('Enter Airtable API URL');
+
+    const progress = document.getElementById('statusText');
+    progress.className = 'alert alert-info';
+    progress.textContent = 'Starting fetch...';
+
+    document.getElementById('imageGrid').innerHTML = ''; // clear old images
+    const records = await fetchAllPages(url, path);
+    const result = await saveBoundCache(records);
+
+    progress.className = result.status === 'saved' ? 'alert alert-success' : 'alert alert-danger';
+    progress.textContent = result.status === 'saved'
+      ? `✅ Saved ${result.records} records to ${result.file}`
+      : `❌ Error saving: ${result.error}`;
+  });
+
+  document.getElementById('listBtn').addEventListener('click', listBoundCaches);
+
 });
-
-document.getElementById('listBtn').addEventListener('click', listBoundCaches);
 </script>
+
 </body>
 </html>
