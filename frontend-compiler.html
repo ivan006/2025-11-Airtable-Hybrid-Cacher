@@ -211,7 +211,12 @@ document.addEventListener("DOMContentLoaded", () => {
             <td>${item.file}</td>
             <td>${sizeKB}</td>
             <td>${new Date(item.created_at).toLocaleString()}</td>
-            <td>${item.duration_seconds ?? '—'}</td>
+            <td>${
+              item.duration_seconds
+                ? `${Math.floor(item.duration_seconds / 60)}m ${Math.round(item.duration_seconds % 60)}s`
+                : '—'
+            }</td>
+
             <td>
               <button class="btn btn-sm btn-outline-danger" onclick="deleteBoundCache('${item.file}')">Delete</button>
             </td>
@@ -333,13 +338,16 @@ document.addEventListener("DOMContentLoaded", () => {
     // ⏱️ Start elapsed timer
     const elapsedEl = document.getElementById('elapsedTime');
     elapsedEl.classList.remove('d-none');
+
     let elapsed = 0;
-    elapsedEl.textContent = `Elapsed: ${elapsed}s`;
+    const startTime = new Date();
+    elapsedEl.textContent = `Started at ${startTime.toLocaleTimeString()} | Elapsed: ${elapsed}s`;
 
     const timer = setInterval(() => {
       elapsed++;
-      elapsedEl.textContent = `Elapsed: ${elapsed}s`;
+      elapsedEl.textContent = `Started at ${startTime.toLocaleTimeString()} | Elapsed: ${elapsed}s`;
     }, 1000);
+
 
     progress.className = 'alert alert-info';
     progress.textContent = '⏳ Starting full compilation...';
@@ -351,6 +359,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const result = await saveBoundCache(records, compileDuration, url);
     progress.className = result.status === 'saved' ? 'alert alert-success' : 'alert alert-danger';
+    clearInterval(timer);
+    const endTime = new Date();
+    elapsedEl.textContent =
+      `Started at ${startTime.toLocaleTimeString()} → Ended at ${endTime.toLocaleTimeString()} (${elapsed}s total)`;
+
     progress.textContent =
       result.status === 'saved'
         ? `✅ Compiled cache in ${compileDuration}s (${result.records} records saved)`
