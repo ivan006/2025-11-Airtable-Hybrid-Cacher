@@ -52,8 +52,10 @@ switch ($action) {
 
   // 🧩 DELETE
   case 'delete':
+
     $file = $_GET['file'] ?? '';
     $path = "$dir/$file";
+    error_log("🧹 DELETE ATTEMPT: " . $path);
     if (file_exists($path)) unlink($path);
     echo json_encode(['status' => 'deleted', 'file' => $file]);
     break;

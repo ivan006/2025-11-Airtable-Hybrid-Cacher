@@ -34,6 +34,8 @@
 
   <button id="startBtn" class="btn btn-primary">Start Compilation</button>
   <button id="listBtn" class="btn btn-secondary ms-2">List Bound Caches</button>
+  <button id="deleteBtn" class="btn btn-danger ms-2">Delete Bound Cache</button>
+
 
   <div id="progressContainer" class="mt-3">
     <h3 id="pageLabel" class="fw-bold text-primary">Page 0</h3>
@@ -47,11 +49,12 @@
   <div id="statusText" class="mt-3 alert alert-info d-none"></div>
 
 
+  <!-- Cache List -->
+  <div id="cacheList" class="mt-4"></div>
+
   <!-- Attachment Preview Grid -->
   <div id="imageGrid" class="mt-4 d-flex flex-wrap"></div>
 
-  <!-- Cache List -->
-  <div id="cacheList" class="mt-4"></div>
 </div>
 
 <script>
@@ -62,13 +65,16 @@ document.addEventListener("DOMContentLoaded", () => {
     let offset = null;
     let page = 1;
     const status = document.getElementById('statusText');
-    const pageBar = document.getElementById('pageProgress');
+    const pageLabel = document.getElementById('pageLabel');
     const imageBar = document.getElementById('imageProgress');
     const imageGrid = document.getElementById('imageGrid');
 
-    const totalEstimate = 100; // rough estimate if Airtable pages are unknown
-
     do {
+      pageLabel.textContent = `Page ${page}`;
+
+      // clear out previous page’s images before starting new batch
+      imageGrid.innerHTML = '';
+
       const pagedUrl = offset ? `${url}&offset=${encodeURIComponent(offset)}` : url;
       const res = await fetch(`index.php?url=${encodeURIComponent(pagedUrl)}&format=json`);
       const data = await res.json();
@@ -83,11 +89,6 @@ document.addEventListener("DOMContentLoaded", () => {
       // === ATTACHMENT LOADING WITH SUB PROGRESS ===
       if (imagePath) {
         const pathParts = imagePath.split('.');
-        const imagePromises = [];
-        let loadedCount = 0;
-        let totalImages = 0;
-
-        // Collect image URLs
         const imageUrls = [];
         records.forEach(rec => {
           let value = rec.fields;
@@ -99,9 +100,21 @@ document.addEventListener("DOMContentLoaded", () => {
           }
         });
 
-        totalImages = imageUrls.length;
+        let loadedCount = 0;
+        const totalImages = imageUrls.length;
+        // Reset image progress instantly (no animation)
+        imageBar.classList.remove('progress-bar-animated', 'progress-bar-striped');
+        imageBar.style.transition = 'none';
         imageBar.style.width = '0%';
         imageBar.textContent = `0 / ${totalImages}`;
+
+        // Force reflow to commit the instant reset before re-enabling animation
+        void imageBar.offsetWidth;
+
+        // Re-enable animation for forward progress
+        imageBar.classList.add('progress-bar-animated', 'progress-bar-striped');
+        imageBar.style.transition = '';
+
 
         for (const imgUrl of imageUrls) {
           const proxiedUrl = `index.php?url=${encodeURIComponent(imgUrl)}`;
@@ -122,20 +135,15 @@ document.addEventListener("DOMContentLoaded", () => {
         }
       }
 
-      // === UPDATE PAGE PROGRESS ===
-      const pctPages = Math.min(100, Math.round((page / totalEstimate) * 100));
-      pageBar.style.width = `${pctPages}%`;
-      pageBar.textContent = `Page ${page}`;
-
       page++;
-      await new Promise(r => setTimeout(r, 400)); // rate-limit between pages
+      await new Promise(r => setTimeout(r, 400)); // small rate-limit delay
     } while (offset);
 
-    pageBar.style.width = '100%';
-    pageBar.textContent = 'All pages complete';
+    pageLabel.textContent = `All ${page - 1} Pages Fetched`;
     imageBar.style.width = '100%';
     imageBar.textContent = 'All images cached';
     return allRecords;
+
   }
 
   async function saveBoundCache(records) {
@@ -180,33 +188,123 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   async function deleteCache(file) {
+    const progress = document.getElementById('statusText');
+
     if (!confirm(`Delete ${file}?`)) return;
-    const res = await fetch(`bound-cache.php?action=delete&file=${encodeURIComponent(file)}`);
-    const data = await res.json();
-    alert(`Deleted: ${data.file}`);
+
+    progress.className = 'alert alert-info';
+    progress.textContent = `🗑️ Deleting ${file}...`;
+
+    try {
+      const res = await fetch(`bound-cache.php?action=delete&file=${encodeURIComponent(file)}`);
+      const data = await res.json();
+
+      if (data.deleted) {
+        progress.className = 'alert alert-success';
+        progress.textContent = `✅ Deleted bound cache: ${file}`;
+      } else {
+        progress.className = 'alert alert-warning';
+        progress.textContent = `⚠️ Could not delete: ${file}`;
+      }
+    } catch (e) {
+      progress.className = 'alert alert-danger';
+      progress.textContent = `❌ Error deleting: ${e.message}`;
+    }
+
     listBoundCaches();
   }
+
 
   document.getElementById('startBtn').addEventListener('click', async () => {
     const url = document.getElementById('apiUrl').value.trim();
     const path = document.getElementById('imagePath').value.trim();
-    if (!url) return alert('Enter Airtable API URL');
+    if (!url) {
+      const progress = document.getElementById('statusText');
+      progress.className = 'alert alert-warning';
+      progress.textContent = '⚠️ Enter Airtable API URL before starting.';
+      return;
+    }
+
 
     const progress = document.getElementById('statusText');
     progress.className = 'alert alert-info';
-    progress.textContent = 'Starting fetch...';
+    progress.textContent = 'Checking for existing bound cache...';
 
-    document.getElementById('imageGrid').innerHTML = ''; // clear old images
-    const records = await fetchAllPages(url, path);
-    const result = await saveBoundCache(records);
+    // Compute hash of the API URL (same logic used for bound-cache.php)
+    const hashBuffer = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(url));
+    const hashHex = Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
+    const cachePath = `cache/merged-${hashHex}.json`;
 
-    progress.className = result.status === 'saved' ? 'alert alert-success' : 'alert alert-danger';
-    progress.textContent = result.status === 'saved'
-      ? `✅ Saved ${result.records} records to ${result.file}`
-      : `❌ Error saving: ${result.error}`;
+    // Try to load existing cache
+    const existing = await fetch(cachePath).then(r => (r.ok ? r.json() : null)).catch(() => null);
+
+    let records;
+    if (existing) {
+      const useExisting = confirm('A bound cache for this URL already exists. Use it instead of refetching?');
+      if (useExisting) {
+        progress.textContent = '✅ Using existing bound cache...';
+        records = existing.records || existing;
+      } else {
+        const confirmRebuild = confirm('Rebuild will overwrite the existing cache. Continue?');
+        if (!confirmRebuild) return;
+        await fetch(`bound-cache.php?action=delete&file=${encodeURIComponent(`merged-${hashHex}.json`)}`);
+        progress.textContent = '♻️ Rebuilding cache from Airtable...';
+        records = await fetchAllPages(url, path);
+        await saveBoundCache(records);
+      }
+    } else {
+      progress.textContent = '⬇️ Fetching fresh data...';
+      records = await fetchAllPages(url, path);
+      await saveBoundCache(records);
+    }
+
+    // Touch images if needed
+    if (path) await touchImages(records, path);
+    progress.className = 'alert alert-success';
+    progress.textContent = `✅ Completed using ${existing ? 'existing' : 'new'} cache`;
   });
 
+
   document.getElementById('listBtn').addEventListener('click', listBoundCaches);
+
+  document.getElementById('deleteBtn').addEventListener('click', async () => {
+    const url = document.getElementById('apiUrl').value.trim();
+    const progress = document.getElementById('statusText');
+
+    if (!url) {
+      progress.className = 'alert alert-warning';
+      progress.textContent = '⚠️ Enter Airtable API URL first.';
+      return;
+    }
+
+    const hashBuffer = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(url));
+    const hashHex = Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
+    const filename = `merged-${hashHex}.json`;
+
+    if (!confirm(`Delete bound cache for this URL?\n\n(${filename})`)) return;
+
+    progress.className = 'alert alert-info';
+    progress.textContent = `🗑️ Deleting ${filename}...`;
+
+    try {
+      const res = await fetch(`bound-cache.php?action=delete&file=${encodeURIComponent(filename)}`);
+      const data = await res.json();
+
+      if (data.deleted || data.status === 'deleted') {
+        progress.className = 'alert alert-success';
+        progress.textContent = `✅ Deleted bound cache: ${file}`;
+      } else {
+        progress.className = 'alert alert-warning';
+        progress.textContent = `⚠️ Could not delete bound cache: ${filename}`;
+      }
+    } catch (e) {
+      progress.className = 'alert alert-danger';
+      progress.textContent = `❌ Error deleting cache: ${e.message}`;
+    }
+
+    listBoundCaches();
+  });
+
 
 });
 </script>
