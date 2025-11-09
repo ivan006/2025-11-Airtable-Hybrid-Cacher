@@ -176,6 +176,24 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
 
+  async function viewBoundCache(url) {
+    try {
+      if (!url) {
+        alert('⚠️ No source URL found for this cache.');
+        return;
+      }
+      const targetUrl = `bound-cache.php?action=get&url=${encodeURIComponent(url)}`;
+      window.open(targetUrl, '_blank');
+    } catch (err) {
+      console.error('Error viewing cache:', err);
+      alert('❌ Failed to open bound cache viewer.');
+    }
+  }
+
+
+
+
+
   async function listBoundCaches() {
     const list = document.getElementById('cacheList');
     list.innerHTML = '<div class="text-muted">⏳ Loading bound caches...</div>';
@@ -189,16 +207,15 @@ document.addEventListener("DOMContentLoaded", () => {
         return;
       }
 
-      // Build table
       let html = `
         <table class="table table-sm table-striped mt-3">
           <thead class="table-light">
             <tr>
-              <th>File</th>
+              <th>Cache</th>
               <th>Size (KB)</th>
               <th>Created</th>
-              <th>Compile Time (s)</th>
-              <th>Action</th>
+              <th>Compile Time</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -206,19 +223,19 @@ document.addEventListener("DOMContentLoaded", () => {
 
       data.forEach(item => {
         const sizeKB = (item.size / 1024).toFixed(1);
+        const duration = item.duration_seconds
+          ? `${Math.floor(item.duration_seconds / 60)}m ${Math.round(item.duration_seconds % 60)}s`
+          : '—';
+
         html += `
           <tr>
-            <td>${item.file}</td>
+            <td>${item.source_url}</td>
             <td>${sizeKB}</td>
             <td>${new Date(item.created_at).toLocaleString()}</td>
-            <td>${
-              item.duration_seconds
-                ? `${Math.floor(item.duration_seconds / 60)}m ${Math.round(item.duration_seconds % 60)}s`
-                : '—'
-            }</td>
-
+            <td>${duration}</td>
             <td>
-              <button class="btn btn-sm btn-outline-danger" onclick="deleteBoundCache('${item.file}')">Delete</button>
+              <button class="btn btn-sm btn-outline-primary me-2" onclick="viewBoundCache('${item.source_url}')">View</button>
+              <button class="btn btn-sm btn-outline-danger" onclick="deleteCache('${item.file}')">Delete</button>
             </td>
           </tr>
         `;
@@ -231,6 +248,7 @@ document.addEventListener("DOMContentLoaded", () => {
       list.innerHTML = `<div class="text-danger">❌ Error loading caches: ${e.message}</div>`;
     }
   }
+
 
 
   async function deleteCache(file) {
@@ -319,7 +337,7 @@ document.addEventListener("DOMContentLoaded", () => {
         progress.textContent = '♻️ Bound cache found — refreshing attachments...';
 
         // load existing cache
-        const res = await fetch(`bound-cache.php?action=get&file=${encodeURIComponent(existing.file)}`);
+        const res = await fetch(`bound-cache.php?action=get&url=${encodeURIComponent(url)}`);
         const data = await res.json();
 
         // touch attachments (non-destructive)
@@ -414,8 +432,13 @@ document.addEventListener("DOMContentLoaded", () => {
     listBoundCaches();
   });
 
+  // expose to global for inline HTML triggers
+  window.viewBoundCache = viewBoundCache;
+  window.deleteCache = deleteCache;
 
 });
+
+
 </script>
 
 </body>

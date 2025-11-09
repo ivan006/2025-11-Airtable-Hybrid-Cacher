@@ -61,11 +61,13 @@ switch ($action) {
             $meta = $json['meta'] ?? [];
 
             $list[] = [
-            'file' => basename($f),
-            'size' => filesize($f),
-            'modified' => date('Y-m-d H:i:s', filemtime($f)),
-            'created_at' => $meta['created_at'] ?? null,
-            'duration_seconds' => $meta['duration_seconds'] ?? null
+                'file' => basename($f),
+                'size' => filesize($f),
+                'modified' => date('Y-m-d H:i:s', filemtime($f)),
+                'created_at' => $meta['created_at'] ?? null,
+                'duration_seconds' => $meta['duration_seconds'] ?? null,
+                // ✅ include original Airtable URL
+                'source_url' => $meta['source_url'] ?? null
             ];
         }
 
@@ -74,17 +76,36 @@ switch ($action) {
 
 
 
-  // 🧩 GET
-  case 'get':
-    $file = $_GET['file'] ?? '';
-    $path = "$dir/$file";
-    if (!file_exists($path)) {
-      http_response_code(404);
-      echo json_encode(['error' => 'File not found']);
-      exit;
-    }
-    echo file_get_contents($path);
-    break;
+
+    // 🧩 GET
+    case 'get':
+        $url = $_GET['url'] ?? null;
+        $fileParam = $_GET['file'] ?? null;
+
+        // 🧠 Determine file path
+        if ($url) {
+            // When fetching by URL, generate the same hash used when saving
+            $hash = hash('sha256', $url);
+            $path = "$dir/bound-$hash.json";
+        } elseif ($fileParam) {
+            // Fallback: still support direct file fetch (legacy)
+            $path = "$dir/$fileParam";
+        } else {
+            http_response_code(400);
+            echo json_encode(['error' => 'No URL or file parameter provided']);
+            exit;
+        }
+
+        if (!file_exists($path)) {
+            http_response_code(404);
+            echo json_encode(['error' => 'Cache not found']);
+            exit;
+        }
+
+        header('Content-Type: application/json; charset=utf-8');
+        echo file_get_contents($path);
+        break;
+
 
 
   // 🧩 DELETE
