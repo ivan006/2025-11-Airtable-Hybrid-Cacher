@@ -360,22 +360,34 @@ document.addEventListener("DOMContentLoaded", () => {
     // === If cache already exists ===
     if (existing) {
       if (attachmentPath) {
+        const progressContainer = document.getElementById('progressContainer');
+        const attachmentBar = document.getElementById('attachmentProgress');
+        const attachmentGrid = document.getElementById('attachmentGrid');
+
+        // reset UI
+        attachmentGrid.innerHTML = '';
+        progressContainer.classList.remove('d-none');
+        attachmentBar.style.width = '0%';
+        attachmentBar.textContent = '0%';
+
+        progress.className = 'alert alert-info';
         progress.textContent = '♻️ Bound cache found — refreshing attachments...';
 
-        // load existing cache
         const res = await fetch(`bound-cache.php?action=get&url=${encodeURIComponent(url)}`);
         const data = await res.json();
 
-        // touch attachments (non-destructive)
-        await touchAttachments(data.records, attachmentPath);
+        // 🧩 show attachments with progress
+        await touchAttachments(data.records, attachmentPath, attachmentBar, attachmentGrid);
+
         progress.className = 'alert alert-success';
         progress.textContent = '✅ Refreshed attachments for existing bound cache.';
       } else {
         progress.className = 'alert alert-warning';
-        progress.textContent = '⚠️ Bound cache already exists. No attachment path given, nothing to do.';
+        progress.textContent = '⚠️ Bound cache already exists. No attachment path given.';
       }
-      return; // 🛑 stop — do NOT rebuild or overwrite
+      return;
     }
+
 
     // === If cache does NOT exist, perform full compilation ===
     const compileStart = performance.now();
