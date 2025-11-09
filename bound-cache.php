@@ -27,7 +27,7 @@ switch ($action) {
             ? hash('sha256', $url)
             : hash('sha256', 'boundcache');
 
-        $file = "$dir/merged-$hash.json";
+        $file = "$dir/bound-$hash.json";
 
         $payload = [
             'records' => $records,

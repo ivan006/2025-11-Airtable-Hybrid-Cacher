@@ -65,16 +65,27 @@ document.addEventListener("DOMContentLoaded", () => {
     const allRecords = [];
     let offset = null;
     let page = 1;
+
     const status = document.getElementById('statusText');
     const pageLabel = document.getElementById('pageLabel');
     const attachmentBar = document.getElementById('attachmentProgress');
     const attachmentGrid = document.getElementById('attachmentGrid');
+    const progressContainer = document.getElementById('progressContainer');
+
+    // ✅ define safely — even if undefined or empty
+    const hasAttachments = attachmentPath && attachmentPath.trim().length > 0;
+
+    // Hide or show attachment UI dynamically
+    const progressWrapper = progressContainer.querySelector('.progress');
+    const progressLabel = progressContainer.querySelector('.mb-2');
+    if (progressWrapper && progressLabel) {
+      progressWrapper.style.display = hasAttachments ? '' : 'none';
+      progressLabel.style.display = hasAttachments ? '' : 'none';
+    }
 
     do {
       pageLabel.textContent = `Page ${page}`;
-
-      // clear out previous page’s attachments before starting new batch
-      attachmentGrid.innerHTML = '';
+      if (attachmentGrid) attachmentGrid.innerHTML = '';
 
       const pagedUrl = offset ? `${url}&offset=${encodeURIComponent(offset)}` : url;
       const res = await fetch(`index.php?url=${encodeURIComponent(pagedUrl)}&format=json`);
@@ -87,10 +98,11 @@ document.addEventListener("DOMContentLoaded", () => {
       status.classList.remove('d-none');
       status.textContent = `Fetched page ${page}, total records so far: ${allRecords.length}`;
 
-      // === ATTACHMENT LOADING WITH SUB PROGRESS ===
-      if (attachmentPath) {
+      // === ATTACHMENT HANDLING ===
+      if (hasAttachments) {
         const pathParts = attachmentPath.split('.');
         const attachmentUrls = [];
+
         records.forEach(rec => {
           let value = rec.fields;
           for (const part of pathParts) value = value?.[part];
@@ -102,34 +114,30 @@ document.addEventListener("DOMContentLoaded", () => {
         });
 
         let loadedCount = 0;
-        const totalAttachments = attachmentUrls.length;
-        // Reset attachment progress instantly (no animation)
+        const total = attachmentUrls.length;
+
+        // Reset instantly (no animation when decreasing)
         attachmentBar.classList.remove('progress-bar-animated', 'progress-bar-striped');
         attachmentBar.style.transition = 'none';
         attachmentBar.style.width = '0%';
-        attachmentBar.textContent = `0 / ${totalAttachments}`;
-
-        // Force reflow to commit the instant reset before re-enabling animation
+        attachmentBar.textContent = `0 / ${total}`;
         void attachmentBar.offsetWidth;
-
-        // Re-enable animation for forward progress
         attachmentBar.classList.add('progress-bar-animated', 'progress-bar-striped');
         attachmentBar.style.transition = '';
 
-
-        for (const imgUrl of attachmentUrls) {
-          const proxiedUrl = `index.php?url=${encodeURIComponent(imgUrl)}`;
-          const img = document.createElement('img');
-          img.src = proxiedUrl;
-          img.title = imgUrl.split('/').pop();
-          attachmentGrid.appendChild(img);
+        for (const fileUrl of attachmentUrls) {
+          const proxiedUrl = `index.php?url=${encodeURIComponent(fileUrl)}`;
+          const el = document.createElement('img');
+          el.src = proxiedUrl;
+          el.title = fileUrl.split('/').pop();
+          attachmentGrid.appendChild(el);
 
           await new Promise(resolve => {
-            img.onload = img.onerror = () => {
+            el.onload = el.onerror = () => {
               loadedCount++;
-              const pct = totalAttachments ? Math.round((loadedCount / totalAttachments) * 100) : 100;
+              const pct = total ? Math.round((loadedCount / total) * 100) : 100;
               attachmentBar.style.width = `${pct}%`;
-              attachmentBar.textContent = `${loadedCount} / ${totalAttachments}`;
+              attachmentBar.textContent = `${loadedCount} / ${total}`;
               resolve();
             };
           });
@@ -137,13 +145,12 @@ document.addEventListener("DOMContentLoaded", () => {
       }
 
       page++;
-      await new Promise(r => setTimeout(r, 400)); // small rate-limit delay
+      await new Promise(r => setTimeout(r, 400));
     } while (offset);
 
     pageLabel.textContent = `All ${page - 1} Pages Fetched`;
 
     if (hasAttachments) {
-      // only show message if we actually processed at least one attachment
       const lastWidth = parseInt(attachmentBar.style.width);
       if (lastWidth > 0) {
         attachmentBar.style.width = '100%';
@@ -155,8 +162,8 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     return allRecords;
-
   }
+
 
   async function saveBoundCache(records, duration, apiUrl) {
     const res = await fetch(`bound-cache.php?action=save&url=${encodeURIComponent(apiUrl)}`, {
@@ -233,9 +240,12 @@ document.addEventListener("DOMContentLoaded", () => {
     const path = document.getElementById('attachmentPath').value.trim();
     const progress = document.getElementById('statusText');
 
+    console.log('▶ Start button clicked', { url, path });
+
     if (!url) {
       progress.className = 'alert alert-warning';
       progress.textContent = '⚠️ Enter Airtable API URL before starting.';
+      console.warn('⚠️ Missing URL');
       return;
     }
 
@@ -243,22 +253,33 @@ document.addEventListener("DOMContentLoaded", () => {
 
     progress.className = 'alert alert-info';
     progress.textContent = '⏳ Starting compilation...';
+    console.log('⏳ Starting compilation...');
 
     document.getElementById('attachmentGrid').innerHTML = '';
-    const records = await fetchAllPages(url, path);
 
-    const compileEnd = performance.now(); // ⏱️ end compile timer
-    const compileDuration = ((compileEnd - compileStart) / 1000).toFixed(2);
+    try {
+      const records = await fetchAllPages(url, path);
+      console.log(`✅ fetchAllPages complete: ${records?.length || 0} records`);
 
-    const result = await saveBoundCache(records, compileDuration, url);
+      const compileEnd = performance.now(); // ⏱️ end compile timer
+      const compileDuration = ((compileEnd - compileStart) / 1000).toFixed(2);
 
+      console.log(`🧩 Calling saveBoundCache (${compileDuration}s)...`);
+      const result = await saveBoundCache(records, compileDuration, url);
+      console.log('💾 saveBoundCache result:', result);
 
-    progress.className = result.status === 'saved' ? 'alert alert-success' : 'alert alert-danger';
-    progress.textContent =
-      result.status === 'saved'
-        ? `✅ Compiled cache in ${compileDuration}s (${result.records} records saved)`
-        : `❌ Error saving: ${result.error}`;
+      progress.className = result.status === 'saved' ? 'alert alert-success' : 'alert alert-danger';
+      progress.textContent =
+        result.status === 'saved'
+          ? `✅ Compiled cache in ${compileDuration}s (${result.records} records saved)`
+          : `❌ Error saving: ${result.error}`;
+    } catch (e) {
+      console.error('❌ Error during compilation:', e);
+      progress.className = 'alert alert-danger';
+      progress.textContent = `❌ Error during compilation: ${e.message}`;
+    }
   });
+
 
 
 
