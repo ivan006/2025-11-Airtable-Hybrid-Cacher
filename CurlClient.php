@@ -48,28 +48,43 @@ class CurlClient
     {
         $this->report(sprintf('Fetching %s', $url));
 
+        // Always write to a real temp file, never a zlib stream
+        $tempPath = tempnam(sys_get_temp_dir(), 'curl_');
+        $tempHandle = fopen($tempPath, 'w+');
+
         curl_setopt_array($this->curl, array(
             CURLOPT_URL => $url,
             CURLOPT_HTTPHEADER => $headers,
-            // CURLOPT_FILE => is_null($file) ? fopen('php://output', 'w') : $file,
-            CURLOPT_FILE => is_null($file) ? STDOUT : $file, // STDOUT if no file
+            CURLOPT_FILE => $tempHandle,
         ));
 
-        // reset the headers array
         $this->headers = array();
-
         $result = curl_exec($this->curl);
+        if ($result === false) {
+            $err = curl_error($this->curl);
+            echo "<pre style='color:red'>❌ CURL failed: $err</pre>";
+            return false;
+        }
+        if (isset($info['http_code']) && $info['http_code'] >= 400) {
+            echo "<pre style='color:red'>❌ HTTP {$info['http_code']} from {$url}</pre>";
+        }
+
+        fclose($tempHandle);
 
         $info = curl_getinfo($this->curl);
-
-        // remove local details
-        unset($info['local_ip']);
-        unset($info['local_port']);
-
+        unset($info['local_ip'], $info['local_port']);
         $info['headers'] = $this->headers;
 
+        // ✅ If caller wanted output to a gzip stream or file, copy it now
+        if ($file) {
+            $tempData = file_get_contents($tempPath);
+            fwrite($file, $tempData);
+        }
+
+        unlink($tempPath);
         return $info;
     }
+
 
     /**
      * Store response headers in an array

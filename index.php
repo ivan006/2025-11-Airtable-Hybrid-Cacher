@@ -122,10 +122,29 @@ if ($nocache || (!file_exists($file) || !file_exists($file . '.json') || filesiz
 
   // TODO: catch exceptions
   $info = $client->get($url, $requestHeaders, $output);
-
   gzclose($output);
 
+  // Check for cURL or HTTP failures
+  if (!isset($info['http_code']) || $info['http_code'] >= 400) {
+      // Delete any incomplete file
+      @unlink($file);
+      @unlink($file . '.json');
+
+      http_response_code(502);
+      header('Content-Type: application/json; charset=utf-8');
+
+      echo json_encode([
+          'error' => true,
+          'message' => 'Fetch failed from remote server',
+          'http_code' => $info['http_code'] ?? null,
+          'url' => $url,
+          'curl_error' => curl_error($client->curl)
+      ], JSON_PRETTY_PRINT);
+      exit();
+  }
+
   file_put_contents($file . '.json', json_encode($info, JSON_PRETTY_PRINT));
+
 }
 
 $info = json_decode(file_get_contents($file . '.json'), true);
