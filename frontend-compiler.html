@@ -100,51 +100,10 @@ document.addEventListener("DOMContentLoaded", () => {
       status.textContent = `Fetched page ${page}, total records so far: ${allRecords.length}`;
 
       // === ATTACHMENT HANDLING ===
+      // === ATTACHMENT HANDLING ===
       if (hasAttachments) {
-        const pathParts = attachmentPath.split('.');
-        const attachmentUrls = [];
-
-        records.forEach(rec => {
-          let value = rec.fields;
-          for (const part of pathParts) value = value?.[part];
-          if (Array.isArray(value)) {
-            value.forEach(v => attachmentUrls.push(v.url || v));
-          } else if (typeof value === 'string') {
-            attachmentUrls.push(value);
-          }
-        });
-
-        let loadedCount = 0;
-        const total = attachmentUrls.length;
-
-        // Reset instantly (no animation when decreasing)
-        attachmentBar.classList.remove('progress-bar-animated', 'progress-bar-striped');
-        attachmentBar.style.transition = 'none';
-        attachmentBar.style.width = '0%';
-        attachmentBar.textContent = `0 / ${total}`;
-        void attachmentBar.offsetWidth;
-        attachmentBar.classList.add('progress-bar-animated', 'progress-bar-striped');
-        attachmentBar.style.transition = '';
-
-        for (const fileUrl of attachmentUrls) {
-          const proxiedUrl = `index.php?url=${encodeURIComponent(fileUrl)}`;
-          const el = document.createElement('img');
-          el.src = proxiedUrl;
-          el.title = fileUrl.split('/').pop();
-          attachmentGrid.appendChild(el);
-
-          await new Promise(resolve => {
-            el.onload = el.onerror = () => {
-              loadedCount++;
-              const pct = total ? Math.round((loadedCount / total) * 100) : 100;
-              attachmentBar.style.width = `${pct}%`;
-              attachmentBar.textContent = `${loadedCount} / ${total}`;
-              resolve();
-            };
-          });
-        }
+        await touchAttachments(records, attachmentPath, attachmentBar, attachmentGrid);
       }
-
       page++;
       await new Promise(r => setTimeout(r, 400));
     } while (offset);
@@ -290,12 +249,10 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   // 🔹 Touch attachments without changing bound cache
-  async function touchAttachments(records, attachmentPath) {
+  async function touchAttachments(records, attachmentPath, attachmentBar = null, grid = null) {
     const pathParts = attachmentPath.split('.');
-    const grid = document.getElementById('attachmentGrid');
-    grid.innerHTML = '';
-
     const urls = [];
+
     records.forEach(r => {
       let val = r.fields;
       for (const p of pathParts) val = val?.[p];
@@ -303,16 +260,49 @@ document.addEventListener("DOMContentLoaded", () => {
       else if (typeof val === 'string') urls.push(val);
     });
 
-    for (const fileUrl of urls) {
-      const img = document.createElement('img');
-      img.src = `index.php?url=${encodeURIComponent(fileUrl)}`;
-      img.style.width = '80px';
-      img.style.margin = '2px';
-      grid.appendChild(img);
+    if (!urls.length) {
+      console.warn('⚠️ No attachments found for path:', attachmentPath);
+      return;
+    }
 
-      await new Promise(resolve => (img.onload = img.onerror = resolve));
+    const total = urls.length;
+    let loaded = 0;
+
+    if (attachmentBar) {
+      attachmentBar.classList.remove('progress-bar-animated', 'progress-bar-striped');
+      attachmentBar.style.transition = 'none';
+      attachmentBar.style.width = '0%';
+      attachmentBar.textContent = `0 / ${total}`;
+      void attachmentBar.offsetWidth;
+      attachmentBar.classList.add('progress-bar-animated', 'progress-bar-striped');
+      attachmentBar.style.transition = '';
+    }
+
+    if (grid) grid.innerHTML = '';
+
+    for (const url of urls) {
+      const img = document.createElement('img');
+      img.src = `index.php?url=${encodeURIComponent(url)}`;
+      img.title = url.split('/').pop();
+      if (grid) grid.appendChild(img);
+
+      await new Promise(res => (img.onload = img.onerror = () => {
+        loaded++;
+        if (attachmentBar) {
+          const pct = Math.round((loaded / total) * 100);
+          attachmentBar.style.width = `${pct}%`;
+          attachmentBar.textContent = `${loaded} / ${total}`;
+        }
+        res();
+      }));
+    }
+
+    if (attachmentBar) {
+      attachmentBar.style.width = '100%';
+      attachmentBar.textContent = 'All attachments cached';
     }
   }
+
 
   document.getElementById('startBtn').addEventListener('click', async () => {
     const url = document.getElementById('apiUrl').value.trim();
