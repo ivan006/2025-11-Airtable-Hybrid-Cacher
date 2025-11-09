@@ -62,33 +62,18 @@
 <script>
 document.addEventListener("DOMContentLoaded", () => {
 
-  async function fetchAllPages(url, attachmentPath) {
+  async function fetchAllPages(url) {
     const allRecords = [];
     let offset = null;
     let page = 1;
 
     const status = document.getElementById('statusText');
     const pageLabel = document.getElementById('pageLabel');
-    const attachmentBar = document.getElementById('attachmentProgress');
-    const attachmentGrid = document.getElementById('attachmentGrid');
-    const progressContainer = document.getElementById('progressContainer');
-
-    // ✅ define safely — even if undefined or empty
-    const hasAttachments = attachmentPath && attachmentPath.trim().length > 0;
-
-    // Hide or show attachment UI dynamically
-    const progressWrapper = progressContainer.querySelector('.progress');
-    const progressLabel = progressContainer.querySelector('.mb-2');
-    if (progressWrapper && progressLabel) {
-      progressWrapper.style.display = hasAttachments ? '' : 'none';
-      progressLabel.style.display = hasAttachments ? '' : 'none';
-    }
 
     do {
       pageLabel.textContent = `Page ${page}`;
-      if (attachmentGrid) attachmentGrid.innerHTML = '';
-
       const pagedUrl = offset ? `${url}&offset=${encodeURIComponent(offset)}` : url;
+
       const res = await fetch(`index.php?regenerate=${encodeURIComponent(pagedUrl)}&format=json`);
       const data = await res.json();
       const records = data.records || [];
@@ -99,30 +84,15 @@ document.addEventListener("DOMContentLoaded", () => {
       status.classList.remove('d-none');
       status.textContent = `Fetched page ${page}, total records so far: ${allRecords.length}`;
 
-      // === ATTACHMENT HANDLING ===
-      // === ATTACHMENT HANDLING ===
-      if (hasAttachments) {
-        await touchAttachments(records, attachmentPath, attachmentBar, attachmentGrid);
-      }
       page++;
-      await new Promise(r => setTimeout(r, 400));
+      await new Promise(r => setTimeout(r, 400)); // gentle rate limit
     } while (offset);
 
     pageLabel.textContent = `All ${page - 1} Pages Fetched`;
-
-    if (hasAttachments) {
-      const lastWidth = parseInt(attachmentBar.style.width);
-      if (lastWidth > 0) {
-        attachmentBar.style.width = '100%';
-        attachmentBar.textContent = 'All attachments cached';
-      } else {
-        attachmentBar.style.width = '0%';
-        attachmentBar.textContent = '';
-      }
-    }
-
     return allRecords;
   }
+
+
 
 
   async function saveBoundCache(records, duration, apiUrl) {
@@ -311,7 +281,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const img = document.createElement('img');
       img.src = proxiedUrl;
       img.title = url.split('/').pop();
-      if (grid) grid.appendChild(img);
+      if (grid) grid.prepend(img);
 
       await new Promise(res => (img.onload = img.onerror = () => {
         loaded++;
@@ -338,6 +308,45 @@ document.addEventListener("DOMContentLoaded", () => {
     console.groupEnd();
   }
 
+  async function handleAttachmentCompilation({
+    source,              // "api" or "bound"
+    url,
+    attachmentPath,
+    attachmentBar,
+    attachmentGrid,
+    progress,
+    fetchRecordsFn,      // function to get records (fetchAllPages or from bound cache)
+  }) {
+    // reset UI
+    attachmentGrid.innerHTML = '';
+    attachmentBar.style.width = '0%';
+    attachmentBar.textContent = '0%';
+    progress.className = 'alert alert-info';
+    progress.textContent =
+      source === 'bound'
+        ? '♻️ Refreshing attachments from existing bound cache...'
+        : '⏳ Starting compilation and attachment caching...';
+
+    // get records from the correct source
+    const records = await fetchRecordsFn(url);
+
+    // only touch attachments if a path is defined
+    if (attachmentPath?.trim()) {
+      await touchAttachments(records, attachmentPath, attachmentBar, attachmentGrid);
+      progress.className = 'alert alert-success';
+      progress.textContent =
+        source === 'bound'
+          ? '✅ Refreshed attachments for existing bound cache.'
+          : '✅ Completed new compilation with attachments.';
+    } else {
+      progress.className = 'alert alert-warning';
+      progress.textContent = '⚠️ No attachment path given — skipping attachment caching.';
+    }
+
+    return records;
+  }
+
+
 
 
   document.getElementById('startBtn').addEventListener('click', async () => {
@@ -359,34 +368,23 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // === If cache already exists ===
     if (existing) {
-      if (attachmentPath) {
-        const progressContainer = document.getElementById('progressContainer');
-        const attachmentBar = document.getElementById('attachmentProgress');
-        const attachmentGrid = document.getElementById('attachmentGrid');
-
-        // reset UI
-        attachmentGrid.innerHTML = '';
-        progressContainer.classList.remove('d-none');
-        attachmentBar.style.width = '0%';
-        attachmentBar.textContent = '0%';
-
-        progress.className = 'alert alert-info';
-        progress.textContent = '♻️ Bound cache found — refreshing attachments...';
-
+      const recordsFetcher = async (url) => {
         const res = await fetch(`bound-cache.php?action=get&url=${encodeURIComponent(url)}`);
         const data = await res.json();
-
-        // 🧩 show attachments with progress
-        await touchAttachments(data.records, attachmentPath, attachmentBar, attachmentGrid);
-
-        progress.className = 'alert alert-success';
-        progress.textContent = '✅ Refreshed attachments for existing bound cache.';
-      } else {
-        progress.className = 'alert alert-warning';
-        progress.textContent = '⚠️ Bound cache already exists. No attachment path given.';
-      }
+        return data.records || [];
+      };
+      await handleAttachmentCompilation({
+        source: 'bound',
+        url,
+        attachmentPath,
+        attachmentBar: document.getElementById('attachmentProgress'),
+        attachmentGrid: document.getElementById('attachmentGrid'),
+        progress,
+        fetchRecordsFn: recordsFetcher,
+      });
       return;
     }
+
 
 
     // === If cache does NOT exist, perform full compilation ===
@@ -408,7 +406,16 @@ document.addEventListener("DOMContentLoaded", () => {
     progress.className = 'alert alert-info';
     progress.textContent = '⏳ Starting full compilation...';
 
-    const records = await fetchAllPages(url, attachmentPath);
+    const records = await handleAttachmentCompilation({
+      source: 'api',
+      url,
+      attachmentPath,
+      attachmentBar: document.getElementById('attachmentProgress'),
+      attachmentGrid: document.getElementById('attachmentGrid'),
+      progress,
+      fetchRecordsFn: fetchAllPages,
+    });
+
 
     const compileEnd = performance.now();
     const compileDuration = ((compileEnd - compileStart) / 1000).toFixed(2);
