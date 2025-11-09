@@ -36,6 +36,9 @@
   <button id="listBtn" class="btn btn-secondary ms-2">List Bound Caches</button>
   <button id="deleteBtn" class="btn btn-danger ms-2">Delete Bound Cache</button>
 
+  <!-- Cache List -->
+  <div id="cacheList" class="mt-4"></div>
+
 
   <div id="progressContainer" class="mt-3">
     <h3 id="pageLabel" class="fw-bold text-primary">Page 0</h3>
@@ -48,10 +51,8 @@
   </div>
 
   <div id="statusText" class="mt-3 alert alert-info d-none"></div>
+  <div id="elapsedTime" class="text-muted small mt-2 d-none"></div>
 
-
-  <!-- Cache List -->
-  <div id="cacheList" class="mt-4"></div>
 
   <!-- Attachment Preview Grid -->
   <div id="attachmentGrid" class="mt-4 d-flex flex-wrap"></div>
@@ -88,7 +89,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (attachmentGrid) attachmentGrid.innerHTML = '';
 
       const pagedUrl = offset ? `${url}&offset=${encodeURIComponent(offset)}` : url;
-      const res = await fetch(`index.php?url=${encodeURIComponent(pagedUrl)}&format=json`);
+      const res = await fetch(`index.php?regenerate=${encodeURIComponent(pagedUrl)}&format=json`);
       const data = await res.json();
       const records = data.records || [];
 
@@ -176,36 +177,56 @@ document.addEventListener("DOMContentLoaded", () => {
 
 
   async function listBoundCaches() {
-    const res = await fetch('bound-cache.php?action=list');
-    const data = await res.json();
-    const listDiv = document.getElementById('cacheList');
-    listDiv.innerHTML = '<h4>Existing Bound Caches</h4>';
+    const list = document.getElementById('cacheList');
+    list.innerHTML = '<div class="text-muted">⏳ Loading bound caches...</div>';
 
-    if (!data.length) {
-      listDiv.innerHTML += '<p>No bound caches found.</p>';
-      return;
-    }
+    try {
+      const res = await fetch('bound-cache.php?action=list');
+      const data = await res.json();
 
-    const table = document.createElement('table');
-    table.className = 'table table-bordered';
-    table.innerHTML = `
-      <thead>
-        <tr><th>File</th><th>Size (bytes)</th><th>Modified</th><th>Actions</th></tr>
-      </thead>
-      <tbody>
-        ${data.map(f => `
+      if (!Array.isArray(data) || data.length === 0) {
+        list.innerHTML = '<div class="text-muted">No bound caches found.</div>';
+        return;
+      }
+
+      // Build table
+      let html = `
+        <table class="table table-sm table-striped mt-3">
+          <thead class="table-light">
+            <tr>
+              <th>File</th>
+              <th>Size (KB)</th>
+              <th>Created</th>
+              <th>Compile Time (s)</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+      `;
+
+      data.forEach(item => {
+        const sizeKB = (item.size / 1024).toFixed(1);
+        html += `
           <tr>
-            <td>${f.file}</td>
-            <td>${f.size}</td>
-            <td>${f.modified}</td>
+            <td>${item.file}</td>
+            <td>${sizeKB}</td>
+            <td>${new Date(item.created_at).toLocaleString()}</td>
+            <td>${item.duration_seconds ?? '—'}</td>
             <td>
-              <a href="cache/${f.file}" target="_blank" class="btn btn-sm btn-success">View</a>
-              <button class="btn btn-sm btn-danger" onclick="deleteCache('${f.file}')">Delete</button>
+              <button class="btn btn-sm btn-outline-danger" onclick="deleteBoundCache('${item.file}')">Delete</button>
             </td>
-          </tr>`).join('')}
-      </tbody>`;
-    listDiv.appendChild(table);
+          </tr>
+        `;
+      });
+
+      html += '</tbody></table>';
+      list.innerHTML = html;
+
+    } catch (e) {
+      list.innerHTML = `<div class="text-danger">❌ Error loading caches: ${e.message}</div>`;
+    }
   }
+
 
   async function deleteCache(file) {
     const progress = document.getElementById('statusText');
@@ -234,51 +255,108 @@ document.addEventListener("DOMContentLoaded", () => {
     listBoundCaches();
   }
 
+  // 🔹 Check if bound cache already exists for a given Airtable URL
+  async function findBoundCache(apiUrl) {
+    const hashBuffer = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(apiUrl));
+    const hashHex = Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
+    const filename = `bound-${hashHex}.json`;
+
+    const res = await fetch('bound-cache.php?action=list');
+    const data = await res.json();
+    return data.find(item => item.file === filename) || null;
+  }
+
+  // 🔹 Touch attachments without changing bound cache
+  async function touchAttachments(records, attachmentPath) {
+    const pathParts = attachmentPath.split('.');
+    const grid = document.getElementById('attachmentGrid');
+    grid.innerHTML = '';
+
+    const urls = [];
+    records.forEach(r => {
+      let val = r.fields;
+      for (const p of pathParts) val = val?.[p];
+      if (Array.isArray(val)) val.forEach(v => urls.push(v.url || v));
+      else if (typeof val === 'string') urls.push(val);
+    });
+
+    for (const fileUrl of urls) {
+      const img = document.createElement('img');
+      img.src = `index.php?url=${encodeURIComponent(fileUrl)}`;
+      img.style.width = '80px';
+      img.style.margin = '2px';
+      grid.appendChild(img);
+
+      await new Promise(resolve => (img.onload = img.onerror = resolve));
+    }
+  }
 
   document.getElementById('startBtn').addEventListener('click', async () => {
     const url = document.getElementById('apiUrl').value.trim();
-    const path = document.getElementById('attachmentPath').value.trim();
+    const attachmentPath = document.getElementById('attachmentPath').value.trim();
     const progress = document.getElementById('statusText');
-
-    console.log('▶ Start button clicked', { url, path });
 
     if (!url) {
       progress.className = 'alert alert-warning';
       progress.textContent = '⚠️ Enter Airtable API URL before starting.';
-      console.warn('⚠️ Missing URL');
       return;
     }
 
-    const compileStart = performance.now(); // ⏱️ start compile timer
+    progress.className = 'alert alert-info';
+    progress.textContent = '🔍 Checking for existing bound cache...';
+
+    // === Check if bound cache already exists ===
+    const existing = await findBoundCache(url);
+
+    // === If cache already exists ===
+    if (existing) {
+      if (attachmentPath) {
+        progress.textContent = '♻️ Bound cache found — refreshing attachments...';
+
+        // load existing cache
+        const res = await fetch(`bound-cache.php?action=get&file=${encodeURIComponent(existing.file)}`);
+        const data = await res.json();
+
+        // touch attachments (non-destructive)
+        await touchAttachments(data.records, attachmentPath);
+        progress.className = 'alert alert-success';
+        progress.textContent = '✅ Refreshed attachments for existing bound cache.';
+      } else {
+        progress.className = 'alert alert-warning';
+        progress.textContent = '⚠️ Bound cache already exists. No attachment path given, nothing to do.';
+      }
+      return; // 🛑 stop — do NOT rebuild or overwrite
+    }
+
+    // === If cache does NOT exist, perform full compilation ===
+    const compileStart = performance.now();
+    // ⏱️ Start elapsed timer
+    const elapsedEl = document.getElementById('elapsedTime');
+    elapsedEl.classList.remove('d-none');
+    let elapsed = 0;
+    elapsedEl.textContent = `Elapsed: ${elapsed}s`;
+
+    const timer = setInterval(() => {
+      elapsed++;
+      elapsedEl.textContent = `Elapsed: ${elapsed}s`;
+    }, 1000);
 
     progress.className = 'alert alert-info';
-    progress.textContent = '⏳ Starting compilation...';
-    console.log('⏳ Starting compilation...');
+    progress.textContent = '⏳ Starting full compilation...';
 
-    document.getElementById('attachmentGrid').innerHTML = '';
+    const records = await fetchAllPages(url, attachmentPath);
 
-    try {
-      const records = await fetchAllPages(url, path);
-      console.log(`✅ fetchAllPages complete: ${records?.length || 0} records`);
+    const compileEnd = performance.now();
+    const compileDuration = ((compileEnd - compileStart) / 1000).toFixed(2);
 
-      const compileEnd = performance.now(); // ⏱️ end compile timer
-      const compileDuration = ((compileEnd - compileStart) / 1000).toFixed(2);
-
-      console.log(`🧩 Calling saveBoundCache (${compileDuration}s)...`);
-      const result = await saveBoundCache(records, compileDuration, url);
-      console.log('💾 saveBoundCache result:', result);
-
-      progress.className = result.status === 'saved' ? 'alert alert-success' : 'alert alert-danger';
-      progress.textContent =
-        result.status === 'saved'
-          ? `✅ Compiled cache in ${compileDuration}s (${result.records} records saved)`
-          : `❌ Error saving: ${result.error}`;
-    } catch (e) {
-      console.error('❌ Error during compilation:', e);
-      progress.className = 'alert alert-danger';
-      progress.textContent = `❌ Error during compilation: ${e.message}`;
-    }
+    const result = await saveBoundCache(records, compileDuration, url);
+    progress.className = result.status === 'saved' ? 'alert alert-success' : 'alert alert-danger';
+    progress.textContent =
+      result.status === 'saved'
+        ? `✅ Compiled cache in ${compileDuration}s (${result.records} records saved)`
+        : `❌ Error saving: ${result.error}`;
   });
+
 
 
 

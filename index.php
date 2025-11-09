@@ -32,6 +32,21 @@ header('Access-Control-Allow-Headers: *');
 }
 
 
+$forceRegenerate = false;
+if (isset($_GET['regenerate'])) {
+  $url = $_GET['regenerate'];
+  $method = 'GET';
+  $file = buildFilePath($method, $url);
+
+  // 🔹 Remove any existing cache for this URL
+  @unlink($file);
+  @unlink($file . '.json');
+
+  // 🔹 Re-run the same logic as a normal ?url= request but force refetch
+  $_GET['url'] = $url;
+  $forceRegenerate = true;
+}
+
 
 if (isset($_GET['delete'])) {
   $url = $_GET['delete'];
@@ -63,7 +78,7 @@ $headers = getallheaders();
 
 $nocache = isset($headers['Vege-Cache-Control']) && ($headers['Vege-Cache-Control'] == 'no-cache');
 
-if ($nocache || (!file_exists($file) || !file_exists($file . '.json') || filesize($file) < 50)) {
+if ($forceRegenerate ?? false || $nocache || (!file_exists($file) || !file_exists($file . '.json') || filesize($file) < 50)) {
   /* pass through request headers */
   $requestHeaders = array_map(function($value, $key) {
     $key = strtolower($key);
