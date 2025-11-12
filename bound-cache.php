@@ -1,4 +1,14 @@
 <?php
+// 🌍 Allow all origins and handle preflight
+header('Access-Control-Allow-Origin: *');
+header('Access-Control-Allow-Methods: GET, POST, DELETE, OPTIONS');
+header('Access-Control-Allow-Headers: *');
+
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+  http_response_code(204);
+  exit;
+}
+
 header('Content-Type: application/json; charset=utf-8');
 require 'helpers.php';
 
