@@ -80,7 +80,7 @@ This project retains **hubgit/cache-proxy’s** efficient caching core while add
    ```bash
    git clone https://github.com/yourname/Airtable-Hybrid-Cacher.git
    cd Airtable-Hybrid-Cacher
-```
+    ```
 
 2. **Ensure PHP 8+ with `curl` + `zlib` extensions**
 
